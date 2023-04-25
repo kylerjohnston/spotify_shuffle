@@ -8,6 +8,54 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 
+def get_playlist_tracks(sp, playlist_id):
+    """
+    Get all tracks in a playlist, even if the playlist has more than 100 tracks.
+
+    Args:
+        sp (spotipy.Spotify): An authenticated Spotipy client instance.
+        playlist_id (str): The ID of the playlist.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries representing each track in the playlist.
+    """
+    results = sp.playlist_tracks(playlist_id, fields="items(track(id)),next")
+    tracks = results["items"]
+    while results["next"]:
+        results = sp.next(results)
+        tracks.extend(results["items"])
+
+    # Get the unique tracks
+    unique_tracks = []
+    track_ids = set()
+    for track in tracks:
+        track_id = track["track"]["id"]
+        if track_id not in track_ids:
+            unique_tracks.append(track)
+            track_ids.add(track_id)
+
+    return unique_tracks
+
+
+def remove_tracks(sp, playlist_id, tracks):
+    """
+    Remove all occurrences of a list of tracks from a playlist.
+
+    Args:
+        sp (spotipy.Spotify): An authenticated Spotipy client instance.
+        playlist_id (str): The ID of the playlist.
+        tracks (List[Dict[str, Any]]): A list of dictionaries representing each track to remove.
+    """
+    # Get the list of track IDs to remove
+    track_ids = [track["track"]["id"] for track in tracks]
+
+    # Remove all occurrences of each track from the playlist
+    for track_id in track_ids:
+        sp.user_playlist_remove_all_occurrences_of_tracks(sp,
+                                                          playlist_id,
+                                                          [track_id])
+
+
 def shuffle_playlist(playlist_id, client_id, client_secret, redirect_uri):
     # Create a SpotifyOAuth object to authenticate with the Spotify API
     sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=client_id,
@@ -16,14 +64,19 @@ def shuffle_playlist(playlist_id, client_id, client_secret, redirect_uri):
                                                    scope="playlist-modify-public playlist-modify-private"))
 
     # Get the list of tracks in the playlist
-    results = sp.playlist_tracks(playlist_id, fields="items(track(id))")
-    tracks = results["items"]
+    tracks = get_playlist_tracks(sp, playlist_id)
+
+    for i in range(0, len(tracks), 100):
+        sp.user_playlist_remove_all_occurrences_of_tracks(sp,
+                                                          playlist_id,
+                                                          [track["track"]["id"] for track in tracks[i:i+100]])
 
     # Shuffle the tracks randomly
     random.shuffle(tracks)
 
-    # Replace the playlist with the shuffled tracks
-    sp.playlist_replace_items(playlist_id, [track["track"]["id"] for track in tracks])
+    # Add the shuffled tracks to the playlist in batches of 100
+    for i in range(0, len(tracks), 100):
+        sp.playlist_add_items(playlist_id, [track["track"]["id"] for track in tracks[i:i+100]])
 
 
 def get_playlist_id(url):
